@@ -1,108 +1,109 @@
-let articles = [
-    { id: 1, title: 'Bienvenue sur le blog', author: 'Admin' },
-    { id: 2, title: 'Mon premier serveur Express', author: 'Syrine' },
-    { id: 3, title: 'Tester une API avec Postman', author: 'Syrine' }
-];
+const Article = require('../models/articleModel');
+const User = require('../models/userModel');
 
-let prochainId = 4;
-
-const getAllArticles = (req, res) => {
-    const { author } = req.query;
-    let resultat = articles;
-
-    if (author) {
-        resultat = articles.filter(a => a.author === author);
+//  Retrieve all articles populated with author information
+const getAllArticles = async (req, res) => {
+    try {
+        const articles = await Article.find().populate('author', 'name email');
+        res.status(200).json(articles);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
     }
-
-    res.status(200).json({
-        total: resultat.length,
-        articles: resultat
-    });
 };
 
-const getArticleById = (req, res) => {
-    const id = Number(req.params.id);
-    const article = articles.find(a => a.id === id);
+// Create a new article linked to an author
+const createArticle = async (req, res) => {
+    try {
+        const { title, content, authorId } = req.body;
+        if (!title || !content || !authorId) {
+            return res.status(400).json({ message: 'title, content, and authorId are required' });
+        }
 
-    if (!article) {
-        return res.status(404).json({
-            error: `Article ${id} introuvable`
-        });
+        let author;
+        try {
+            author = await User.findById(authorId);
+        } catch (err) {
+            if (err.name === 'CastError') {
+                return res.status(400).json({ message: 'Invalid resource identifier (ObjectId expected)' });
+            }
+            throw err;
+        }
+
+        if (!author) {
+            return res.status(404).json({ message: 'Author not found (invalid authorId)' });
+        }
+
+        const newArticle = await Article.create({ title, content, author: authorId });
+        const populatedArticle = await newArticle.populate('author', 'name email');
+        res.status(201).json(populatedArticle);
+    } catch (err) {
+        if (err.name === 'ValidationError') {
+            return res.status(400).json({ message: err.message });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    res.status(200).json(article);
 };
 
-const createArticle = (req, res) => {
-    const { title, author } = req.body;
-
-    if (!title || !author) {
-        return res.status(400).json({
-            error: "Le titre et l'auteur sont obligatoires"
-        });
+//  Retrieve a single article by ID
+const getArticleById = async (req, res) => {
+    try {
+        const article = await Article.findById(req.params.id).populate('author', 'name email');
+        if (!article) {
+            return res.status(404).json({ message: 'Article not found' });
+        }
+        res.status(200).json(article);
+    } catch (err) {
+        if (err.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid resource identifier ' });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    const nouvelArticle = {
-        id: prochainId++,
-        title,
-        author
-    };
-
-    articles.push(nouvelArticle);
-
-    res.status(201).json({
-        message: 'Article créé',
-        article: nouvelArticle
-    });
 };
 
-const updateArticle = (req, res) => {
-    const id = Number(req.params.id);
-    const { title, author } = req.body;
-
-    const index = articles.findIndex(a => a.id === id);
-
-    if (index === -1) {
-        return res.status(404).json({
-            error: `Article ${id} introuvable`
-        });
+// PUT /api/articles/:id
+const updateArticle = async (req, res) => {
+    try {
+        const article = await Article.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+        if (!article) {
+            return res.status(404).json({ message: 'Article not found for update' });
+        }
+        const populated = await article.populate('author', 'name email');
+        res.status(200).json(populated);
+    } catch (err) {
+        if (err.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid resource identifier (' });
+        }
+        if (err.name === 'ValidationError') {
+            return res.status(400).json({ message: err.message });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    if (title !== undefined) {
-        articles[index].title = title;
-    }
-
-    if (author !== undefined) {
-        articles[index].author = author;
-    }
-
-    res.status(200).json({
-        message: 'Article mis à jour',
-        article: articles[index]
-    });
 };
 
-const deleteArticle = (req, res) => {
-    const id = Number(req.params.id);
-    const articleExiste = articles.some(a => a.id === id);
-
-    if (!articleExiste) {
-        return res.status(404).json({
-            error: `Impossible de supprimer : article ${id} introuvable`
-        });
+//  DELETE /api/articles/:id
+const deleteArticle = async (req, res) => {
+    try {
+        const article = await Article.findByIdAndDelete(req.params.id);
+        if (!article) {
+            return res.status(404).json({ message: 'Article not found for deletion' });
+        }
+        res.status(200).json({ message: 'Article deleted successfully', id: req.params.id });
+    } catch (err) {
+        if (err.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid resource identifier (ObjectId expected)' });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    articles = articles.filter(a => a.id !== id);
-
-    res.status(200).json({
-        message: `Article ${id} supprimé avec succès`
-    });
 };
 
 module.exports = {
     getAllArticles,
-    getArticleById,
     createArticle,
+    getArticleById,
     updateArticle,
     deleteArticle
 };

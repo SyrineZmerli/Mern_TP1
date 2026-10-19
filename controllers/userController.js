@@ -1,93 +1,88 @@
-let users = [
-    { id: 1, name: 'Rihab', email: 'rihab@gmail.com', role: 'user' },
-    { id: 2, name: 'Syrine', email: 'syrine.zmerli@polytechnicien.com', role: 'admin' }
-];
+const User = require('../models/userModel');
+const Article = require('../models/articleModel');
 
-let prochainId = 3;
-
-const { estNonVide, estEmailValide } = require('../utils/validators');
-
-const getAllUsers = (req, res) => {
-    const { role } = req.query;
-    let resultat = users;
-
-    if (role) {
-        resultat = users.filter(u => u.role === role);
+// POST /api/users
+const createUser = async (req, res) => {
+    try {
+        const { name, email, age, role, bio, phone } = req.body;
+        if (!name || !email) {
+            return res.status(400).json({ message: 'Name and email are required' });
+        }
+        // uplicate email
+        const exists = await User.findOne({ email });
+        if (exists) {
+            return res.status(409).json({ message: 'Email already in use' });
+        }
+        const user = await User.create({ name, email, age, role, bio, phone });
+        res.status(201).json(user);
+    } catch (err) {
+        if (err.name === 'ValidationError') {
+            return res.status(400).json({ message: err.message });
+        }
+        if (err.code === 11000) {
+            return res.status(409).json({ message: 'Email already in use' });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    res.status(200).json({
-        total: resultat.length,
-        users: resultat
-    });
 };
 
-const getUserById = (req, res) => {
-    const id = Number(req.params.id);
-    const user = users.find(u => u.id === id);
-
-    if (!user) {
-        return res.status(404).json({
-            error: `Utilisateur ${id} introuvable`
-        });
+// GET /api/users
+const getUsers = async (req, res) => {
+    try {
+        const users = await User.find();
+        res.status(200).json(users);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
     }
-
-    res.status(200).json(user);
 };
 
-const createUser = (req, res) => {
-    const { name, email, role } = req.body;
-
-    if (!estNonVide(name) || !estEmailValide(email)) {
-        return res.status(400).json({
-            error: 'Un nom valide et un email valide sont obligatoires'
-        });
+// GET /api/users/:id) with CastError handling 
+const getUserById = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.status(200).json(user);
+    } catch (err) {
+        if (err.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid resource identifier (ObjectId expected)' });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    const emailExiste = users.some(
-        u => u.email.toLowerCase() === email.trim().toLowerCase()
-    );
-
-    if (emailExiste) {
-        return res.status(400).json({
-            error: 'Cet email existe déjà'
-        });
-    }
-
-    const nouvelUtilisateur = {
-        id: prochainId++,
-        name: name.trim(),
-        email: email.trim(),
-        role: role || 'user'
-    };
-
-    users.push(nouvelUtilisateur);
-
-    res.status(201).json({
-        message: 'Utilisateur créé',
-        user: nouvelUtilisateur
-    });
 };
 
-const deleteUser = (req, res) => {
-    const id = Number(req.params.id);
-    const existe = users.some(u => u.id === id);
+//  Secure user deletion with Referential Integrity Guard 
+const deleteUser = async (req, res) => {
+    try {
+        const userId = req.params.id;
 
-    if (!existe) {
-        return res.status(404).json({
-            error: `Utilisateur ${id} introuvable`
-        });
+        // Verify user exists first
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // check for dependent articles authored by this user
+        const dependentArticle = await Article.findOne({ author: userId });
+        if (dependentArticle) {
+            return res.status(400).json({ message: 'Impossible to delete an author with published articles' });
+        }
+
+        await User.findByIdAndDelete(userId);
+        res.status(200).json({ message: 'User deleted successfully', id: userId });
+    } catch (err) {
+        if (err.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid resource identifier (ObjectId expected)' });
+        }
+        res.status(500).json({ message: err.message });
     }
-
-    users = users.filter(u => u.id !== id);
-
-    res.status(200).json({
-        message: `Utilisateur ${id} supprimé avec succès`
-    });
 };
 
 module.exports = {
-    getAllUsers,
-    getUserById,
     createUser,
+    getUsers,
+    getAllUsers: getUsers, 
+    getUserById,
     deleteUser
 };
