@@ -1,109 +1,153 @@
 const Article = require('../models/articleModel');
-const User = require('../models/userModel');
 
-//  Retrieve all articles populated with author information
 const getAllArticles = async (req, res) => {
-    try {
-        const articles = await Article.find().populate('author', 'name email');
-        res.status(200).json(articles);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  try {
+    const articles = await Article.find().populate('author', 'name email role');
+    res.status(200).json(articles);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// Create a new article linked to an author
-const createArticle = async (req, res) => {
-    try {
-        const { title, content, authorId } = req.body;
-        if (!title || !content || !authorId) {
-            return res.status(400).json({ message: 'title, content, and authorId are required' });
-        }
-
-        let author;
-        try {
-            author = await User.findById(authorId);
-        } catch (err) {
-            if (err.name === 'CastError') {
-                return res.status(400).json({ message: 'Invalid resource identifier (ObjectId expected)' });
-            }
-            throw err;
-        }
-
-        if (!author) {
-            return res.status(404).json({ message: 'Author not found (invalid authorId)' });
-        }
-
-        const newArticle = await Article.create({ title, content, author: authorId });
-        const populatedArticle = await newArticle.populate('author', 'name email');
-        res.status(201).json(populatedArticle);
-    } catch (err) {
-        if (err.name === 'ValidationError') {
-            return res.status(400).json({ message: err.message });
-        }
-        res.status(500).json({ message: err.message });
-    }
-};
-
-//  Retrieve a single article by ID
 const getArticleById = async (req, res) => {
-    try {
-        const article = await Article.findById(req.params.id).populate('author', 'name email');
-        if (!article) {
-            return res.status(404).json({ message: 'Article not found' });
-        }
-        res.status(200).json(article);
-    } catch (err) {
-        if (err.name === 'CastError') {
-            return res.status(400).json({ message: 'Invalid resource identifier ' });
-        }
-        res.status(500).json({ message: err.message });
+  try {
+    const article = await Article.findById(req.params.id)
+      .populate('author', 'name email role');
+
+    if (!article) {
+      return res.status(404).json({ message: 'Article non trouvé' });
     }
+
+    res.status(200).json(article);
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({ message: 'Identifiant invalide' });
+    }
+
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// PUT /api/articles/:id
+const getMyArticles = async (req, res) => {
+  try {
+    const articles = await Article.find({ author: req.user._id })
+      .populate('author', 'name email role');
+
+    res.status(200).json(articles);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+const createArticle = async (req, res) => {
+  try {
+    const { title, content } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({
+        message: 'Titre et contenu obligatoires'
+      });
+    }
+
+    const newArticle = await Article.create({
+      title,
+      content,
+      author: req.user._id
+    });
+
+    const populated = await newArticle.populate(
+      'author',
+      'name email role'
+    );
+
+    res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 const updateArticle = async (req, res) => {
-    try {
-        const article = await Article.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            { new: true, runValidators: true }
-        );
-        if (!article) {
-            return res.status(404).json({ message: 'Article not found for update' });
-        }
-        const populated = await article.populate('author', 'name email');
-        res.status(200).json(populated);
-    } catch (err) {
-        if (err.name === 'CastError') {
-            return res.status(400).json({ message: 'Invalid resource identifier (' });
-        }
-        if (err.name === 'ValidationError') {
-            return res.status(400).json({ message: err.message });
-        }
-        res.status(500).json({ message: err.message });
+  try {
+    const article = await Article.findById(req.params.id);
+
+    if (!article) {
+      return res.status(404).json({
+        message: 'Article non trouvé'
+      });
     }
+
+    if (
+      article.author.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({
+        message: "Action interdite : vous n'êtes pas l'auteur de cet article"
+      });
+    }
+
+    article.title = req.body.title || article.title;
+    article.content = req.body.content || article.content;
+
+    const updated = await article.save();
+
+    const populated = await updated.populate(
+      'author',
+      'name email role'
+    );
+
+    res.status(200).json(populated);
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({
+        message: 'Identifiant invalide'
+      });
+    }
+
+    res.status(500).json({ message: err.message });
+  }
 };
 
-//  DELETE /api/articles/:id
 const deleteArticle = async (req, res) => {
-    try {
-        const article = await Article.findByIdAndDelete(req.params.id);
-        if (!article) {
-            return res.status(404).json({ message: 'Article not found for deletion' });
-        }
-        res.status(200).json({ message: 'Article deleted successfully', id: req.params.id });
-    } catch (err) {
-        if (err.name === 'CastError') {
-            return res.status(400).json({ message: 'Invalid resource identifier (ObjectId expected)' });
-        }
-        res.status(500).json({ message: err.message });
+  try {
+    const article = await Article.findById(req.params.id);
+
+    if (!article) {
+      return res.status(404).json({
+        message: 'Article non trouvé'
+      });
     }
+
+    if (
+      article.author.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({
+        message: "Action interdite : vous n'êtes pas l'auteur de cet article"
+      });
+    }
+
+    await article.deleteOne();
+
+    res.status(200).json({
+      message: 'Article supprimé avec succès',
+      id: req.params.id
+    });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({
+        message: 'Identifiant invalide'
+      });
+    }
+
+    res.status(500).json({ message: err.message });
+  }
 };
 
 module.exports = {
-    getAllArticles,
-    createArticle,
-    getArticleById,
-    updateArticle,
-    deleteArticle
+  getAllArticles,
+  getArticleById,
+  getMyArticles,
+  createArticle,
+  updateArticle,
+  deleteArticle
 };
